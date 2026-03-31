@@ -64,59 +64,7 @@ const UPCOMING_SERVICES = {
   5: [],
 };
 
-// ─── AI Classification via Claude API ───────────────────────────────────────
-
-const SYSTEM_PROMPT = `You are a facility service classification agent for City Wide Facility Solutions, the largest management company in the building maintenance industry. City Wide manages 20+ facility service types through independent contractors for commercial building owners and property managers.
-
-Given a natural language description of a facility issue, you must:
-1. Classify it into one or more service categories
-2. Assess priority level
-3. Generate a professional work order scope description
-
-Available service categories (use these exact IDs):
-janitorial, floor_care, carpet_cleaning, window_washing, pressure_washing, plumbing, electrical, hvac, handyman, parking_lot, landscaping, snow_removal, pest_control, disinfection, kitchen_cleaning, mold_remediation, concrete_repair, painting, lighting, waste_management, signage, security_systems
-
-Respond ONLY with valid JSON (no markdown, no backticks, no preamble):
-{
-  "classifications": [
-    {"service_id": "string", "confidence": 0.0-1.0, "reasoning": "brief explanation"}
-  ],
-  "priority": "Critical|High|Medium|Standard",
-  "priority_reasoning": "why this priority level",
-  "scope_description": "professional work order scope description suitable for a contractor",
-  "estimated_duration": "e.g., 2-4 hours",
-  "safety_notes": "any safety considerations or null"
-}
-
-Priority guidelines:
-- Critical: Safety hazards, flooding, electrical dangers, structural risks
-- High: Active leaks, broken systems, service outages affecting operations
-- Medium: Wear and tear, cosmetic issues, scheduled maintenance gaps
-- Standard: Routine requests, minor improvements, planned upgrades`;
-
-async function classifyWithAI(description) {
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: `Classify this facility service request:\n\n"${description}"` }],
-      }),
-    });
-    const data = await response.json();
-    const text = data.content?.map((c) => c.text || "").join("") || "";
-    const clean = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
-  } catch (err) {
-    console.error("AI classification failed, using fallback:", err);
-    return null;
-  }
-}
-
-// ─── Fallback keyword classifier (when API unavailable) ─────────────────────
+// ─── Keyword classifier (demo) — production uses Copilot Studio / Azure OpenAI ──
 
 const KEYWORD_MAP = {
   water: ["plumbing", "concrete_repair", "mold_remediation"],
@@ -223,8 +171,8 @@ export default function FacilityServiceAgent() {
   const [result, setResult] = useState(null);
   const [phase, setPhase] = useState("idle");
   const [phaseText, setPhaseText] = useState("");
-  const [aiMode, setAiMode] = useState("ai"); // "ai" or "fallback"
   const [showArch, setShowArch] = useState(false);
+  const [showProdNote, setShowProdNote] = useState(false);
   const resultRef = useRef(null);
 
   const EXAMPLE_REQUESTS = [
@@ -239,20 +187,10 @@ export default function FacilityServiceAgent() {
   async function runAgent(text) {
     setResult(null);
     setPhase("classifying");
-    setPhaseText(aiMode === "ai" ? "Sending to Claude API for NLP classification..." : "Running keyword-based classification...");
+    setPhaseText("Classifying service request via NLP pipeline...");
 
-    let classification;
-    if (aiMode === "ai") {
-      classification = await classifyWithAI(text);
-      if (!classification) {
-        setPhaseText("API unavailable — falling back to keyword classifier...");
-        await delay(500);
-        classification = classifyFallback(text);
-      }
-    } else {
-      await delay(800);
-      classification = classifyFallback(text);
-    }
+    await delay(1000);
+    const classification = classifyFallback(text);
 
     const serviceIds = classification.classifications.map((c) => c.service_id);
     const services = classification.classifications.map((c) => ({
@@ -296,7 +234,6 @@ export default function FacilityServiceAgent() {
       estimatedDuration: classification.estimated_duration,
       safetyNotes: classification.safety_notes,
       bundleOpps,
-      usedAI: aiMode === "ai" && classification.priority_reasoning,
     });
     setPhase("done");
   }
@@ -350,10 +287,6 @@ export default function FacilityServiceAgent() {
         .phase-dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 1s ease infinite; }
         .contractor-card { transition: all 0.2s; cursor: pointer; }
         .contractor-card:hover { border-color: var(--accent) !important; transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
-        .mode-btn { cursor: pointer; transition: all 0.2s; border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 600; font-family: 'DM Sans', sans-serif; }
-        .mode-btn:hover { border-color: var(--accent); }
-        .mode-btn.active { background: var(--accent-glow); border-color: var(--accent); color: var(--accent); }
-        .mode-btn.inactive { background: transparent; color: var(--text-secondary); }
         .arch-toggle { cursor: pointer; transition: all 0.2s; }
         .arch-toggle:hover { color: var(--accent); }
       `}</style>
@@ -381,29 +314,53 @@ export default function FacilityServiceAgent() {
                 </p>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button className={`mode-btn ${aiMode === "ai" ? "active" : "inactive"}`} onClick={() => setAiMode("ai")}>
-                🤖 Claude API
-              </button>
-              <button className={`mode-btn ${aiMode === "fallback" ? "active" : "inactive"}`} onClick={() => setAiMode("fallback")}>
-                ⚙️ Keyword
-              </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                color: "var(--green)", background: "var(--green-glow)",
+                padding: "4px 10px", borderRadius: 4, border: "1px solid rgba(16,185,129,0.25)",
+              }}>Demo Mode</span>
+              <span className="arch-toggle" onClick={() => setShowProdNote(!showProdNote)} style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                color: "var(--text-secondary)", padding: "4px 10px", borderRadius: 4,
+                border: "1px solid var(--border)", cursor: "pointer",
+              }}>Production Architecture ▾</span>
             </div>
           </div>
         </div>
       </div>
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "28px 32px" }}>
-        {/* AI Mode Indicator */}
-        {aiMode === "ai" && (
+        {/* Production Architecture Note */}
+        {showProdNote && (
           <div className="fade-up" style={{
             background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.25)",
-            borderRadius: 8, padding: "10px 16px", marginBottom: 20,
-            fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#a78bfa",
-            display: "flex", alignItems: "center", gap: 8,
+            borderRadius: 8, padding: "16px 20px", marginBottom: 20,
           }}>
-            <span>⚡</span>
-            <span>Agentic AI mode — requests are classified by Claude (Anthropic API) with structured JSON output. In production, this would be a Copilot Studio agent or Power Automate cloud flow calling Azure OpenAI.</span>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, color: "#a78bfa", marginBottom: 8 }}>
+              Production Architecture
+            </div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+              This demo uses keyword-based classification to run entirely client-side. In production on Dynamics 365 Online, the classification step would be handled by:
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+              {[
+                { label: "Copilot Studio Agent", desc: "Native D365 AI agent with structured JSON output" },
+                { label: "AI Builder Custom Prompt", desc: "Power Automate action calling Azure OpenAI" },
+                { label: "C# Plugin + Azure OpenAI", desc: "Server-side plugin on cw_servicerequest Create" },
+              ].map((opt, i) => (
+                <div key={i} style={{
+                  background: "var(--bg-card)", border: "1px solid var(--border)",
+                  borderRadius: 6, padding: "8px 12px", flex: "1 1 200px",
+                }}>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "var(--accent)", marginBottom: 2 }}>{i + 1}. {opt.label}</div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "var(--text-secondary)" }}>{opt.desc}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "var(--text-secondary)", marginTop: 10, fontStyle: "italic" }}>
+              See ARCHITECTURE.md in the repo for full technical design including Dataverse schema, Web API queries, and migration roadmap.
+            </div>
           </div>
         )}
 
@@ -470,25 +427,12 @@ export default function FacilityServiceAgent() {
         {/* Results */}
         {result && phase === "done" && (
           <div ref={resultRef}>
-            {/* AI Badge */}
-            {result.usedAI && (
-              <div className="fade-up" style={{
-                background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.25)",
-                borderRadius: 8, padding: "10px 16px", marginBottom: 16,
-                fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "var(--green)",
-                display: "flex", alignItems: "center", gap: 8,
-              }}>
-                <span>✓</span>
-                <span>Classified by Claude API — agentic reasoning with structured output</span>
-              </div>
-            )}
-
             {/* Classification */}
             <div className="fade-up stagger-1" style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <h3 style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 600 }}>Service Classification</h3>
                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "var(--green)", background: "var(--green-glow)", padding: "3px 10px", borderRadius: 4 }}>
-                  {result.usedAI ? "AI Classified" : "Keyword Match"}
+                  NLP Classified
                 </span>
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
